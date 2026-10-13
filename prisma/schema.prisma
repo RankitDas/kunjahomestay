@@ -1,0 +1,287 @@
+generator client {
+  provider = "prisma-client-js"
+  output = "./node_modules/.prisma/client"
+}
+
+datasource Db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Property {
+  id               Int          @id
+  publicPropertySlug    String       @unique
+  name               String
+  description        String?
+  address            String
+  city               String
+  district           String
+  state              String
+  postalCode         String
+  latitude           Decimal?     @Db.Decimal(10, 7)
+  longitude          Decimal?     @Db.Decimal(10, 7)
+  googleMapsURL      String?
+  contactDetails     String?
+  checkInPolicy      String
+  checkOutPolicy     String
+  status             String       @default("active")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  roomCategories     RoomCategory[]
+  bookings           Booking[]
+  propertyAmenities  PropertyAmenity[]
+  roomMedia          RoomMedia[]
+  roomPlans          RatePlan[]
+}
+
+model RoomCategory {
+  id               Int          @id
+  propertyId       Int
+  name             String
+  description      String?
+  isAC             Boolean
+  adultOccupancy   Int
+  childOccupancy   Int
+  bedConfiguration String
+  inventoryQuantity Int        @default(1)
+  baseRate         Int         // in paise (integer representation)
+  taxConfiguration String      // e.g., "5%", "18%", "tax-inclusive"
+  active           Boolean      @default(true)
+  sortOrder        Int         @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  property         Property       @relation(fields: [propertyId], references: [id])
+  roomAmenities    RoomAmenity[]
+  amenities        Amenity[]    @relation(name: "roomCategoryAmenities")
+  roomMedia        RoomMedia[]
+  ratePlans        RatePlan[]
+  bookingItems     BookingItem[]
+}
+
+model RoomAmenity {
+  roomCategoryId   Int
+  amenityId        Int
+
+  @@id([roomCategoryId, amenityId])
+  roomCategory     RoomCategory @relation(fields: [roomCategoryId], references: [id])
+  amenity          Amenity      @relation(fields: [amenityId], references: [id])
+}
+
+model Amenity {
+  id               Int          @id
+  name             String
+  descriptionOrIconKey String?
+  propertyId       Int?         // optional: direct property association
+  createdAt        DateTime     @default(now())
+
+  roomCategories   RoomCategory[]  @relation(name: "roomCategoryAmenities")
+  roomAmenities    RoomAmenity[]
+  propertyAmenities PropertyAmenity[]
+}
+
+model PropertyAmenity {
+  propertyId       Int
+  amenityId        Int
+
+  @@id([propertyId, amenityId])
+property         Property       @relation(fields: [propertyId], references: [id])
+  amenity          Amenity        @relation(fields: [amenityId], references: [id])
+}
+
+model RoomMedia {
+  id               Int          @id
+  roomCategoryId   Int?
+  propertyId       Int?
+  mediaType        String       // e.g., "image", "video", "youtube", "vimeo"
+  storageKey       String       // S3 key, Cloudinary public ID, or local path
+  caption          String?
+  displayOrder     Int          @default(0)
+  isMainCover      Boolean      @default(false)
+
+  roomCategory     RoomCategory? @relation(fields: [roomCategoryId], references: [id])
+  property         Property?     @relation(fields: [propertyId], references: [id])
+}
+
+model RatePlan {
+  id               Int          @id
+  propertyId       Int?
+  roomCategoryId   Int?
+  validityStart    DateTime
+  validityEnd      DateTime?
+  nightlyRate      Int          // in paise
+  pricingRules     String?      // JSON or text description
+  taxDisplayConfig String        // "tax-inclusive" or "tax-exclusive"
+  minStayDays      Int          @default(1)
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  property         Property?    @relation(fields: [propertyId], references: [id])
+  roomCategory     RoomCategory? @relation(fields: [roomCategoryId], references: [id])
+}
+
+model Guest {
+  id               Int          @id
+  guestName        String
+  email            String
+  phone            String       @unique()
+  billingDetails   String?      // JSON for address, GST, etc.
+  createdAt        DateTime     @default(now())
+
+  @@unique([email, phone])
+}
+
+model Booking {
+  id                Int          @id
+  bookingReference  String       @unique // opaque reference, e.g., UUIDv4
+  propertyId        Int
+  guestId           Int?
+  checkIn           DateTime
+  checkOut          DateTime
+  adultCount        Int
+  childCount        Int
+  roomCount         Int
+  status            String       // "pending_payment", "confirmed", "cancelled", "completed", "no-show"
+  currency          String       @default("INR")
+  priceSnapshot     Int          // integer paise snapshot at booking time
+  taxSnapshot       String       // tax configuration used at booking time
+  totalAmount       Int          // total in paise at booking time
+  amountPaid        Int          @default(0)
+  balanceDue        Int          // totalAmount - amountPaid
+  cancellationStatus String?     // "none", "requested", "approved", "rejected"
+  adminUserId       Int          // nullable admin who created/modified the booking
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  property          Property       @relation(fields: [propertyId], references: [id])
+  guest             Guest?       @relation(fields: [guestId], references: [id])
+  payment           Payment?      @relation(fields: [id], references: [bookingId])
+  invoices          Invoice[]
+  receipts          Receipt[]
+  bookingItems      BookingItem[]
+
+adminUser        AdminUser     @relation(fields: [adminUserId], references: [id], name: "adminUserBookings")
+}
+
+model BookingItem {
+  id               Int          @id
+  bookingId        Int
+  roomCategoryId   Int
+  roomQuantity     Int
+  nightlyRate      Int          // in paise at time of booking
+  taxRate          String       // tax rate string
+  priceBreakdown   String       // JSON or text price breakdown
+  physicalRoomAssignment String? // nullable; if set, references a specific room unit
+  inventoryAllocation String // e.g., "category-based" or "specific-room"
+  reservedDates    String       // JSON: check-in/check-out and range
+  createdAt        DateTime     @default(now())
+
+  booking          Booking     @relation(fields: [bookingId], references: [id])
+  roomCategory     RoomCategory @relation(fields: [roomCategoryId], references: [id])
+}
+
+model InventoryHold {
+  id               Int          @id
+  bookingId        Int?          // nullable; associates with a booking if confirmed
+  associatedSessionId String? // e.g., checkout session ID
+  roomCategoryId   Int
+  startDate        DateTime
+  endDate          DateTime
+  expirationTimestamp DateTime
+  holdStatus       String       // "active", "expired", "released", "converted"
+  createdAt        DateTime     @default(now())
+
+  roomCategory     RoomCategory @relation(fields: [roomCategoryId], references: [id])
+  booking          Booking?     @relation(fields: [bookingId], references: [id])
+}
+
+model Payment {
+  id               Int          @id
+  bookingId        Int          @unique // one payment per booking
+  gateway          String       // "razorpay", "simulated", etc.
+  gatewayOrderReference String // Razorpay order ID or equivalent
+  gatewayTransactionReference String // Razorpay payment ID or equivalent
+  amountInPaise    Int          // amount in minor currency units
+  currency         String       @default("INR")
+  paymentMethodMetadata String? // JSON: method, card type, UPI ID, etc.
+  status           String       // "created", "pending", "successful", "failed", "refund_pending", "partially_refunded", "refunded"
+  verificationInformation String? // JSON: webhook event data, signature verification
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  booking          Booking      @relation(fields: [bookingId])
+}
+
+model Invoice {
+  id               Int          @id
+  bookingId        Int        @unique // one invoice per booking
+  invoiceNumber    String       // unique sequential number
+  invoiceType      String       // "receipt", "tax_invoice", "credit_note", "debit_note"
+  invoiceStatus    String       // "draft", "issued", "cancelled", "replaced"
+  issuedDate       DateTime
+  supplierSnapshot String       // JSON: business name, address, GSTIN, etc.
+  customerSnapshot String       // JSON: guest name, address, GSTIN (if applicable)
+  taxAndLineItemSnapshot String // JSON: line items, rates, tax amounts
+  totalAmount      Int          // in paise
+  documentStorageReference String // path/key to stored PDF document
+  correctionOrCancellationReferences String? // references to replaced/cancelled invoices
+  createdAt        DateTime     @default(now())
+
+  booking          Booking     @relation(fields: [bookingId], references: [id])
+}
+
+model Receipt {
+  id               Int          @id
+  bookingOrPaymentId Int
+  receiptNumber    String       // unique receipt number
+  issueTimestamp   DateTime
+  amountReceived   Int          // in paise
+  paymentReference String       // gateway transaction reference
+  documentStorageReference String // path/key to stored PDF document
+  createdAt        DateTime     @default(now())
+
+  bookingOrPayment  Booking?     @relation(fields: [bookingOrPaymentId], references: [id])
+}
+
+model FoodOption {
+  id               Int          @id
+  propertyId       Int
+  name             String
+  description      String?
+  mealType         String       // "breakfast", "lunch", "dinner", "refreshments"
+  price            Int          // in paise, per person per meal
+  availability     String       // "available", "unavailable", "advance_required"
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+
+  property         Property    @relation(fields: [propertyId], references: [id])
+}
+
+model AdminUser {
+  id               Int          @id
+  username         String       @unique
+  passwordHash     String
+  adminUserId      Int?         // linking to bookings (nullable for system bookings)
+  role             String       @default("admin")
+  isActive         Boolean      @default(true)
+  lastLogin        DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  adminLogs        AdminLog[]
+  bookings         Booking[]    @relation(name: "adminUserBookings")
+}
+
+model AdminLog {
+  id               Int          @id
+  adminUserId      Int
+  action           String       // e.g., "property_update", "room_rate_change", "booking_modification"
+  affectedRecord   String       // e.g., "property_5", "booking_12"
+  beforeValue      String?      // JSON or text description of state before change
+  afterValue       String?      // JSON or text description of state after change
+  timestamp        DateTime     @default(now())
+
+  adminUser        AdminUser   @relation(fields: [adminUserId], references: [id])
+}
